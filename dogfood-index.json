@@ -1,0 +1,200 @@
+{
+  "schema": 1,
+  "line": {
+    "repo": "nsiccha/Optimization.jl",
+    "ref": "dogfood",
+    "sha": "586bf50360655f1725a369e01a290292066685b3"
+  },
+  "upstream": {
+    "repo": "SciML/Optimization.jl",
+    "ref": "master",
+    "sha": "11fd5d9ecd76951a7c2794fde274538551df79d1"
+  },
+  "prepared_at": "2026-11-18T12:00:08Z",
+  "problems": [
+    {
+      "id": "first-order-hessian",
+      "role": "fix",
+      "title": "Unconstrained L-BFGS allocates a dense Hessian before the first iteration",
+      "summary": "First-order Optim methods allocate quadratic workspace for an unused Hessian. The constrained-path change in #910 does not cover the unconstrained method.",
+      "repairs": [],
+      "upstream_refs": [
+        {
+          "url": "https://github.com/SciML/Optimization.jl/issues/893",
+          "relation": "reports"
+        },
+        {
+          "url": "https://github.com/SciML/Optimization.jl/pull/910",
+          "relation": "related"
+        },
+        {
+          "url": "https://github.com/SciML/Optimization.jl/pull/1442",
+          "relation": "fixes"
+        }
+      ],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "1eecc3bbb933e3f6e1783fa5c8f5a32f73f74099",
+            "title": "Use a once-differentiable objective for unconstrained first-order methods",
+            "original": [
+              "1eecc3bbb933e3f6e1783fa5c8f5a32f73f74099"
+            ]
+          }
+        ],
+        "why_together": "The unconstrained adapter and its allocation regression are one change. This commit applies directly to the recorded upstream base."
+      },
+      "depends_on": [],
+      "requires": [],
+      "validation": [
+        {
+          "base": "11fd5d9ecd76951a7c2794fde274538551df79d1",
+          "tests": [
+            "OptimizationOptimJL/test/core_tests.jl — Issue #893: no dense Hessian buffer for first-order methods"
+          ],
+          "result": "passed",
+          "detail": "11 checks passed with Optim 2.3.2. L-BFGS, conjugate gradient and gradient descent each allocated less than one dense Hessian after warmup. Newton still evaluated its Hessian. Tested dogfood commit 586bf50360655f1725a369e01a290292066685b3.",
+          "julia": "1.10.12"
+        }
+      ],
+      "draft": {
+        "title": "Unconstrained L-BFGS allocates a dense Hessian before the first iteration",
+        "body": "For an unconstrained solve on OptimizationOptimJL 0.4.23, a first-order optimizer allocates space for a dense Hessian. At 2,000 variables one such matrix is 32 MB.\n\n```julia\nusing OptimizationOptimJL, OptimizationOptimJL.Optim, OptimizationBase\nf = OptimizationFunction((x,p) -> sum(abs2,x); grad=(g,x,p) -> (g .= 2 .* x))\np = OptimizationProblem(f, ones(2000))\nsolve(p, LBFGS(); maxiters=20)\nbytes = @allocated solve(p, LBFGS(); maxiters=20)\n@show bytes\n```\n\nL-BFGS only uses gradients. A warmed solve should allocate less than even one dense Hessian, but the unconstrained adapter constructs a twice-differentiable objective. Select a once-differentiable objective for methods that do not request a Hessian. Keep the Hessian and Hessian-vector paths for methods that use them. #893 records the original report and #1442 covers the unconstrained path.",
+        "prepared_at": "2026-11-18T12:00:08Z"
+      }
+    },
+    {
+      "id": "enzyme-constraint-products",
+      "role": "fix",
+      "title": "AutoEnzyme cannot generate requested out-of-place constraint products",
+      "summary": "Requesting a constraint Jacobian product can dispatch to an absent user callback. When a Jacobian is supplied, generated products should use it before differentiating the constraints.",
+      "repairs": [],
+      "upstream_refs": [
+        {
+          "url": "https://github.com/SciML/Optimization.jl/issues/1410",
+          "relation": "reports"
+        },
+        {
+          "url": "https://github.com/SciML/Optimization.jl/pull/1419",
+          "relation": "fixes"
+        }
+      ],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "a6f2ec9fd0a4e59241f30bae5ec48d8ba2a5c97b",
+            "title": "Generate requested Enzyme constraint products and respect user callback precedence",
+            "original": [
+              "a6f2ec9fd0a4e59241f30bae5ec48d8ba2a5c97b"
+            ]
+          }
+        ],
+        "why_together": "This change contains both product directions and tests for callback precedence. It preserves upstream’s in-place differentiation helpers and seed buffer, and is independent of the Optim and MadNLP changes."
+      },
+      "depends_on": [],
+      "requires": [],
+      "validation": [
+        {
+          "base": "11fd5d9ecd76951a7c2794fde274538551df79d1",
+          "tests": [
+            "OptimizationBase/test/AD/adtests.jl — generated out-of-place products and supplied callback precedence",
+            "AutoEnzyme in-place products use a user cons_j"
+          ],
+          "result": "passed",
+          "detail": "9 assertions passed with Enzyme 0.13.221, including comparisons to explicit Jacobian products and tests that a supplied product wins. Tested dogfood commit 586bf50360655f1725a369e01a290292066685b3.",
+          "julia": "1.10.12"
+        }
+      ],
+      "draft": {
+        "title": "AutoEnzyme cannot generate requested out-of-place constraint products",
+        "body": "On OptimizationBase 5.10.1, this out-of-place constraint has a known Jacobian at `[1, 2]`.\n\n```julia\nusing OptimizationBase, Enzyme, ChainRulesCore\nad = OptimizationBase.AutoEnzyme()\nf = OptimizationFunction{false}((x,p) -> sum(x), ad; cons=(x,p) -> [sum(abs2,x)])\nx = [1.0, 2.0]\ng = OptimizationBase.instantiate_function(f, x, ad, nothing, 1; cons_vjp=true, cons_jvp=true)\ng.cons_vjp(x, [1.0])       # expected [2.0, 4.0]\ng.cons_jvp(x, [0.0, 1.0])  # expected [4.0]\n```\n\nUpstream selects a callback that was never supplied. Handle the two directions independently. Use an explicit product first, then a supplied Jacobian, then Enzyme’s reverse or forward differentiation with correctly sized buffers. #1410 and #1419 track the issue and proposed fix.",
+        "prepared_at": "2026-11-18T12:00:08Z"
+      }
+    },
+    {
+      "id": "enzyme-multiplier-seed",
+      "role": "fix",
+      "title": "Keep the solver’s multiplier vector intact after an in-place constraint pullback",
+      "summary": "Reverse differentiation used to clear the caller’s output seed. Upstream #1424 already copies that seed into a dedicated buffer. The fork adds an explicit assertion that the caller’s values survive.",
+      "repairs": [],
+      "upstream_refs": [
+        {
+          "url": "https://github.com/SciML/Optimization.jl/pull/1424",
+          "relation": "superseded-by"
+        },
+        {
+          "url": "https://github.com/SciML/Optimization.jl/pull/1419",
+          "relation": "related"
+        }
+      ],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "586bf50360655f1725a369e01a290292066685b3",
+            "title": "Assert that the in-place pullback preserves the caller’s seed",
+            "original": [
+              "586bf50360655f1725a369e01a290292066685b3"
+            ]
+          }
+        ],
+        "why_together": "The upstream base already includes the implementation. This one test-only commit covers the remaining difference from the topic branch. On an older base the original implementation and test were published together on that topic."
+      },
+      "depends_on": [],
+      "requires": [],
+      "validation": [
+        {
+          "base": "11fd5d9ecd76951a7c2794fde274538551df79d1",
+          "tests": [
+            "In-place constraint VJP with a caller-owned multiplier and a known gradient"
+          ],
+          "result": "passed",
+          "detail": "Both checks passed with Enzyme 0.13.221. The pullback produced the correct derivative and the original multiplier retained its value. Tested dogfood commit 586bf50360655f1725a369e01a290292066685b3.",
+          "julia": "1.10.12"
+        }
+      ]
+    },
+    {
+      "id": "madnlp-011",
+      "role": "fix",
+      "title": "Allow MadNLP 0.11 in OptimizationMadNLP environments",
+      "summary": "The old compatibility bound excluded MadNLP 0.11. PR #1439 merged the change upstream, so the dogfood branch inherits it directly.",
+      "repairs": [],
+      "upstream_refs": [
+        {
+          "url": "https://github.com/SciML/Optimization.jl/pull/1439",
+          "relation": "superseded-by"
+        }
+      ],
+      "fix": {
+        "branch": "dogfood",
+        "commits": [
+          {
+            "sha": "131c59279c96f0cee31257a49ea6e23d160fdf47",
+            "title": "Accept MadNLP 0.11 in OptimizationMadNLP",
+            "original": [
+              "131c59279c96f0cee31257a49ea6e23d160fdf47"
+            ]
+          }
+        ],
+        "why_together": "The single upstream commit updates the dependency range and wrapper version. It is patch-equivalent to the fork topic commit. There is no additional patch to apply to current master."
+      },
+      "depends_on": [],
+      "requires": [],
+      "validation": [
+        {
+          "base": "11fd5d9ecd76951a7c2794fde274538551df79d1",
+          "tests": [
+            "Resolve OptimizationMadNLP with MadNLP 0.11",
+            "Solve a one-variable quadratic with a binding upper bound"
+          ],
+          "result": "passed",
+          "detail": "3 checks passed with OptimizationMadNLP 2.3.3 and MadNLP 0.11.0, covering the resolved minor version, successful termination and the expected boundary solution. Tested dogfood commit 586bf50360655f1725a369e01a290292066685b3.",
+          "julia": "1.10.12"
+        }
+      ]
+    }
+  ]
+}
